@@ -1,0 +1,151 @@
+extends KinematicBody2D
+
+onready var animationPlayer = $AnimationPlayer
+onready var wanderController = $WanderController
+onready var playerDetector = $Player_Detector
+onready var rayCast = $RayCast2D
+onready var sprite = $Sprite
+onready var tween = $Light2D/Attack_and_Chase_Tween
+onready var attackDetector = $Attack_Detector
+
+var wanderDuration = 1.15
+var is_facing_left = true
+var velocity = Vector2.ZERO
+var speed = 45
+var direction = [-1,1]
+var gravity = 900
+var rng = RandomNumberGenerator.new()
+var gravityFall_Clamp = 300
+var is_Attacking = false
+
+enum{
+	IDLE,
+	WANDER,
+	CHASE,
+	ATTACK,
+}
+
+var state = IDLE
+
+func _ready():
+	$damage_Hitbox.monitorable = false
+	$damage_Hitbox.monitoring = false
+	rng.randomize()
+	randomize() # DIfferent seed everytime
+	
+	direction.shuffle()
+	change_scaling(direction[0])
+	velocity.x  = -speed if direction[0] == 1 else speed
+	
+func _process(delta):
+	transition_light(state)
+	switch_toChase()
+	switch_toAttack()
+	velocity.y += gravity
+	velocity.y = clamp(velocity.y, -gravityFall_Clamp, gravityFall_Clamp)
+	velocity = move_and_slide(velocity,Vector2.UP)
+#	print($Environment_Detector.get_collider())
+#	print("DIRECTION: ",direction[0])
+	match state:
+		IDLE:
+			velocity.x = 0
+			animationPlayer.play("Idle")
+			if wanderController.get_Timeleft() == 0:
+				#CHANGE SCALE/DIRECTION HERE
+				
+				direction.shuffle()
+				change_scaling(direction[0])
+				pick_idle_or_wander()
+		WANDER:
+#			print("WANDER")
+			detect_turn_around() # detects if its beside a cliff
+			animationPlayer.play("Wandering")
+			move_character(direction[0])
+			if wanderController.get_Timeleft() == 0:
+				pick_idle_or_wander()
+				
+		CHASE:
+			if playerDetector.is_colliding():
+				var chaseSpeed = speed + 40
+				animationPlayer.play("Chase")
+				velocity.x  = -chaseSpeed if direction[0] == 1 else chaseSpeed
+				velocity.x = clamp(velocity.x,-chaseSpeed,chaseSpeed)
+				move_and_slide(velocity,Vector2.UP)
+			else:
+				if wanderController.get_Timeleft() == 0:
+					pick_idle_or_wander()
+					
+		ATTACK:
+			var dashSpeed = speed * 5 # dash effect
+			if attackDetector.is_colliding():
+				if is_Attacking == false:
+					$damage_Hitbox.monitorable = true
+					$damage_Hitbox.monitoring = true
+					$BeetleAttack.play()
+					is_Attacking = true
+					
+				animationPlayer.play("Attack")
+				velocity.x = -dashSpeed if direction[0] == 1 else dashSpeed
+				velocity.x = clamp(velocity.x,-dashSpeed - 20,dashSpeed + 20)
+			else:
+				if wanderController.get_Timeleft() == 0:
+					state = CHASE
+func switch_toAttack():
+	if attackDetector.is_colliding():
+		state = ATTACK
+	
+
+func switch_toChase():
+	if playerDetector.is_colliding():
+		state = CHASE
+func pick_idle_or_wander():
+	state = pick_randomState([IDLE,WANDER])
+	wanderController.start_WanderTimer(rand_range(.75,wanderDuration))
+	
+func pick_randomState(state_list):
+	state_list.shuffle()
+	return state_list[0]
+		
+func move_character(direction):
+	velocity.x  = -speed if direction == 1 else speed
+	velocity.x = clamp(velocity.x,-speed,speed)
+	move_and_slide(velocity,Vector2.UP)
+	
+func change_scaling(direction): # KinematicBody2D does not work with changing with scale.x
+	if direction == 1: # Facing Left
+		playerDetector.scale.y = 1
+		attackDetector.scale.y = 1
+		rayCast.position.x = -35
+		sprite.scale.x = 1
+	else: # facubg right
+		playerDetector.scale.y = -1
+		attackDetector.scale.y = -1
+		rayCast.position.x = 35
+		sprite.scale.x = -1
+		
+func detect_turn_around(): # FORCES TO go on idle state until it turns around when beside a cliff
+	velocity.x = 0
+	if not $RayCast2D.is_colliding() and is_on_floor():
+		state = IDLE
+
+func transition_light(state):
+	if state == CHASE or state ==  ATTACK: # Produces light agressively when it sees player
+			tween.interpolate_property($Light2D,"texture_scale",$Light2D.texture_scale,1.3,.4,Tween.TRANS_LINEAR,Tween.EASE_OUT)
+			tween.interpolate_property($Light2D,"energy",$Light2D.energy,1.3,.4,Tween.TRANS_LINEAR,Tween.EASE_OUT)
+#			tween.interpolate_property($Light2D,"color",$Light2D.color,"ff1900",.5,Tween.TRANS_LINEAR,Tween.EASE_OUT)
+			tween.start()
+	else: # Shifts light to go dim
+			tween.interpolate_property($Light2D,"texture_scale",$Light2D.texture_scale,0,.6,Tween.TRANS_LINEAR,Tween.EASE_OUT)
+			tween.interpolate_property($Light2D,"energy",$Light2D.energy,0,.6,Tween.TRANS_LINEAR,Tween.EASE_OUT)
+#			tween.interpolate_property($Light2D,"color",$Light2D.color,"ff4935",.5,Tween.TRANS_LINEAR,Tween.EASE_OUT)
+			tween.start()
+		
+
+
+func _on_BeetleAttack_finished():
+	$damage_Hitbox.monitorable = false
+	$damage_Hitbox.monitoring = false
+	is_Attacking = false
+
+
+
